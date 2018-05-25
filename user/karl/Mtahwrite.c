@@ -18,10 +18,15 @@ and sftahwrite.
 The sftahwrite program reads the trace and header data (tah) from 
 standard input (usually a pipe), separates the trace data from the
 header data.  The trace data is written to output and the header is
-written to outheaders.  The trace headers are used to select the 
-location in the file to write the data.  The iline and xline headers 
-are used in the following example to put stacked data in 
-(time, xline, iline) order so it can be viewed using sfgrey.
+written to outheaders.  The output files can be mapped or sequential.
+Mapped files use to trace header to determine the location in the 
+file to write the trace.  The iline and xline headers are used in the 
+following example to put stacked data in (time, xline, iline) order 
+so it can be viewed using sfgrey. Sequential files order the traces in 
+the file in the order they are read from standard output.  Sequential 
+files are a good way to save traces when the order is not important.
+Sequential files are especially useful to save prestack seismic data.
+The following example also saves the data in sequential mode.    
 
 EXAMPLE:
 
@@ -38,6 +43,10 @@ sftahread \\
    label2="xline" o2=1 n2=188 d2=1   \\
    label3="iline" o3=1 n3=345 d3=1   \\
    output=mappedstack.rsf \\
+| sftahwrite \\
+   verbose=1                           \\
+   mode=seq \\
+   output=seqstack.rsf \\
 >/dev/null
 
 sfgrey <mappedstack.rsf | sfpen
@@ -198,7 +207,17 @@ int main(int argc, char* argv[])
   sf_putstring(outheaders,"label1","none"    );
   sf_putstring(outheaders,"unit1" ,"none"    );
   
-  if((modestring=sf_getstring("mode"))==NULL)modestring="mapped";
+  if(verbose>2)fprintf(stderr,"after putint unit1\n");
+  modestring=sf_getstring("mode");
+  /* \n
+     mapped - order traces in the output file by traces headers 
+              use label2, label3... n2, n3, ..., o2, o3, .. and d2, d3,..
+     seq - just write the traces to the output files in the order
+           read from STDIN
+     \n
+  */
+  if(modestring==NULL)modestring="mapped";
+  if(verbose>2)fprintf(stderr,"modestring=%s\n",modestring);
   if(strcmp(modestring,"mapped")!=0 && strcmp(modestring,"seq")!=0){
     fprintf(stderr,"parameter mode in sftahwrite must be mapped of seg\n");
     fprintf(stderr,"mode=%s\n",modestring);
@@ -215,6 +234,7 @@ int main(int argc, char* argv[])
     sf_putint(outheaders,"o2",1);
     sf_putint(output    ,"d2",1);
     sf_putint(outheaders,"d2",1);
+    if(verbose>2)fprintf(stderr,"seq path after putint d2\n");
   } else {
     dim_output=1;
     for (iaxis=1; iaxis<SF_MAX_DIM; iaxis++){
@@ -383,7 +403,7 @@ int main(int argc, char* argv[])
     /* write either mapped or sequential files */
     if(!mode_is_seq){
       /* mapped output file */
-      if(0)fprintf(stderr,"call tahwritemapped\n");
+      if(verbose>2)fprintf(stderr,"call tahwritemapped\n");
       tahwritemapped(verbose,intrace, fheader, 
          	      n1_traces, n1_headers,
 		      output, outheaders,
@@ -392,18 +412,18 @@ int main(int argc, char* argv[])
 		      n_output,n_outheaders);
     } else {
       /* seq output file */
-      if(0)fprintf(stderr,"call tahwriteseq\n");
+      if(verbose>2)fprintf(stderr,"call tahwriteseq\n");
       tahwriteseq(verbose,intrace, fheader, 
 		  n1_traces, n1_headers,
 		  output, outheaders,
-		  typehead);
+		  typehead, num_traces);
     }
     /**********************************************/
     /* write trace and headers to the output pipe */
     /**********************************************/
     put_tah(intrace, fheader, n1_traces, n1_headers, out);
   }
-  fprintf(stderr,"test mode_is_seq\n");
+  if(verbose>2)fprintf(stderr,"test mode_is_seq\n");
   if(mode_is_seq){
     FILE *myoutputfile;
     fprintf(stderr,"write n2=%d\n",num_traces);

@@ -6,14 +6,18 @@ import bldutil
 ######################################################################
 # 1. C main programs
 progs = '''
-cohn checkptdemo dlct fpocs2d fpocs3d fwi2d fbrec2d 
-istinterp istpad istseislet lsrtm2d lsprtm2d lsinterp2d 
-mwni2d myradon2 mythresh mshots mcaseislet modeling2d mysnr
-pocs3d pocs pocsseislet rtm2d rtmadcig rtmva2d
+cohn checkptdemo fwi2d fbrec2d istseislet lsrtm2d lsprtm2d 
+mythresh mshots mcaseislet modeling2d mysnr
+pocsseislet rtm2d rtmadcig rtmodcig rtmva2d
 Testfd2d Testfd3d Testeb Testelastic2d Testaniso Testspml
-viscoa2d viscoe2d
+viscoa2d viscoe2d excitationic
 '''
-# maxwell_sponge1 maxwell_cpml1 
+# lsprtm2d
+progs_fftw='''
+dlct fpocs2d fpocs3d istinterp lsinterp2d istpad 
+pocs3d pocs ps2d mwni2d  myradon2
+'''
+#
 
 ######################################################################
 # 2. C++ main programs
@@ -40,14 +44,10 @@ mpigpufwi
 
 ######################################################################
 # 6. Fortran 90 main programs
-f90_progs = '''
-demofftw3
+f90_progs = ''' 
 '''
-#maxwell_direct_fb maxwell_sponge2_fb maxwell_cpml28_fb maxwell_cpml24_fb
-#maxwell_cpml3d_fb maxwell_boundary1 maxwell_boundary2 maxwell_dftinterp 
-#maxwell_polyinterp maxwell_bsplineinterp maxwell_ksincinterp
-#dftinterp1d polyinterp1d bsplineinterp1d ksincinterp1d
-#gmbva gmbva_rev2
+#demofftw3
+
 
 
 ######################################################################
@@ -74,7 +74,6 @@ src = Glob('[a-z]*.c')
 env.Prepend(CPPPATH=['../../include'],
             LIBPATH=['../../lib'],
             LIBS=[env.get('DYNLIB','')+'rsfpwd',
-		  env.get('DYNLIB','')+'rsf++',
                   env.get('DYNLIB','')+'rsf'])
 
 # fftw settings
@@ -101,21 +100,24 @@ if 'f90' in api and F90:
 for source in src:
     inc = env.RSF_Include(source,prefix='')
     obj = env.StaticObject(source)
+    env.Ignore(inc,inc)
     env.Depends(obj,inc)
 
 ######################################################################
 # 1. compiling C programs
 cmains = Split(progs)
-for prog in cmains:
+cmains_fftw = Split(progs_fftw)
+for prog in cmains+cmains_fftw:
     sources = ['M' + prog]
     bldutil.depends(env,sources,'M'+prog)
-    if fftw:
+    if fftw or prog in cmains:
         env.StaticObject('M'+prog+'.c')
         prog = env.Program(prog,map(lambda x: x + '.o',sources))
     else:
         prog = env.RSF_Place('sf'+prog,None,var='FFTW',package='fftw')
     if root:
         env.Install(bindir,prog)
+
 
 ######################################################################
 # 2. compiling C++ programs
@@ -224,11 +226,6 @@ f90_mains = Split(f90_progs)
 if 'f90' in api and F90:
     env.Prepend(F90PATH=['../../include'],
             LIBS=['rsff90',env.get('DYNLIB','')+'rsf'])
-    F90base =  os.path.basename(F90)
-    if F90base[:8] == 'gfortran' or F90base[:3] == 'gfc':
-        env.Append(F90FLAGS=' -J${SOURCE.dir}')
-    elif F90base == 'ifort':
-        env.Append(F90FLAGS=' -module ${SOURCE.dir}')
 
 for prog in f90_mains:
     sources = ['M' + prog]
@@ -260,7 +257,7 @@ if root:
     user = os.path.basename(os.getcwd())
     main = 'sf%s.py' % user
     
-    docs = map(lambda prog: env.Doc(prog,'M' + prog),cmains+mpi_cmains) + \
+    docs = map(lambda prog: env.Doc(prog,'M' + prog),cmains+cmains_fftw+mpi_cmains) + \
            map(lambda prog: env.Doc(prog,'M%s.cc' % prog,lang='c++'),ccmains) +\
 	   map(lambda prog: env.Doc(prog,'M' + prog+'.cu'),cuda_mains + cuda_mpi_mains)+ \
 	   map(lambda prog: env.Doc(prog,'M'+prog+'.f90',lang='f90'),f90_mains)+\

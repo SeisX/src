@@ -24,9 +24,9 @@ int main (int argc, char *argv[])
 {
     int n123, niter, order, i,j, liter, dim;
     int n[SF_MAX_DIM], rect[2], nr, ir; 
-    float a0, *u, *a, eps;
+    float a0, *u, *p;
     bool verb;
-    sf_file in, out, angle;
+    sf_file in, out, sn, cs;
 
     sf_init(argc,argv);
     in = sf_input ("in");
@@ -44,7 +44,7 @@ int main (int argc, char *argv[])
     
     if (!sf_getint("niter",&niter)) niter=5;
     /* number of iterations */
-    if (!sf_getint("liter",&liter)) liter=20;
+    if (!sf_getint("liter",&liter)) liter=50;
     /* number of linear iterations */
 
     if (!sf_getint("rect1",&rect[0])) rect[0]=1;
@@ -61,42 +61,55 @@ int main (int argc, char *argv[])
     if (!sf_getbool("verb",&verb)) verb = true;
     /* verbosity flag */
 
-    if (!sf_getfloat("eps",&eps)) eps=1.0f;
-    /* regularization */
-
+    sf_shiftdim(in, out, 3);
+    sf_putint(out,"n3",2);
+    
     /* initialize dip estimation */
     odip2_init(n[0], n[1], rect, liter, verb);
 
     u = sf_floatalloc(n123);
-    a = sf_floatalloc(n123);
+    p = sf_floatalloc(2*n123);
 
-    if (NULL != sf_getstring("angle")) {
-	/* initial in-line dip */
-	angle = sf_input("angle");
+    if (NULL != sf_getstring("sin")) {
+	/* initial dip (sine) */
+	sn = sf_input("sin");
     } else {
-	angle = NULL;
+	sn = NULL;
     }
 
-    for (ir=0; ir < nr; ir++) {
+    if (NULL != sf_getstring("cos")) {
+	/* initial dip (cosine) */
+	cs = sf_input("cos");
+    } else {
+	cs = NULL;
+    }
+
+    for (ir=0; ir < nr; ir++) {	
+
+	/* initialize t-x dip */
+	if (NULL != sn) {
+	    sf_floatread(p,n123,sn);
+	} else {
+	    for(i=0; i < n123; i++) {
+		p[i] = 0.0f;
+	    }
+	}
+	if (NULL != cs) {
+	    sf_floatread(p+n123,n123,cs);
+	} else {
+	    for(i=0; i < n123; i++) {
+		p[n123+i] = 1.0f;
+	    }
+	}
 
 	/* read data */
 	sf_floatread(u,n123,in);
 	
-
-	/* initialize t-x dip */
-	if (NULL != angle) {
-	    sf_floatread(a,n123,angle);
-	} else {
-	    for(i=0; i < n123; i++) {
-		a[i] = a0;
-	    }
-	}
-	
 	/* estimate dip */
-	odip2(niter, order, u, a, eps);
-	
+	odip2(niter, order, u, p);
+		
 	/* write dip */
-	sf_floatwrite(a,n123,out);
+	sf_floatwrite(p,2*n123,out);
     }
     
     exit (0);

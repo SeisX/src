@@ -71,4 +71,4 @@ void ricker_close(void)
     sf_freqfilt_close();
 }
 
-/* 	$Id: ricker.c 5023 2009-11-23 01:19:26Z sfomel $	 */
+/* 	$Id$	 */

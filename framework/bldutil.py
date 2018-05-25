@@ -295,6 +295,7 @@ def build_install_c(env, progs_c, srcroot, bindir, libdir, glob_build, bldroot):
     for source in src:
         inc = env.RSF_Include(source,prefix='')
         obj = env.StaticObject(source)
+        env.Ignore(inc,inc)
         env.Depends(obj,inc)
 
     mains_c = Split(progs_c)
@@ -335,14 +336,6 @@ def build_install_f90(env, progs_f90, srcroot, bindir, api, bldroot, glob_build)
         env.Prepend(LIBS=['rsff90','rsf'], # order matters when linking
                     LIBPATH=[os.path.join(srcroot,'lib')],
                     F90PATH=os.path.join(srcroot,'include'))
-
-        F90base = os.path.basename(F90)
-        if F90base[:8] == 'gfortran' or F90base[:3] == 'gfc':
-            env.Append(F90FLAGS=' -J${SOURCE.dir}')
-        elif F90base[:5] == 'ifort':
-            env.Append(F90FLAGS=' -module ${SOURCE.dir}/../../include')
-        elif F90base[:5] == 'pgf90':
-            env.Append(F90FLAGS=' -module ${SOURCE.dir} -I${SOURCE.dir}')
 
         for prog in mains_f90:
             if not glob_build:
@@ -413,6 +406,25 @@ def install_py_mains(env, progs_py, bindir):
            mains_py)
 
     return docs_py
+
+################################################################################
+
+def install_jl_mains(env, progs_jl, bindir):
+    'Copy Julia programs to bindir'
+
+    mains_jl = Split(progs_jl)
+
+    if sys.platform[:6] == 'cygwin':
+        exe = '.exe'
+    else:
+        exe = ''
+
+    for prog in mains_jl:
+        binary = os.path.join(bindir,'sf'+prog+exe)
+        # Copy the program to the right location
+        env.InstallAs(binary,'M'+prog+'.jl')
+        # Fix permissions for executable python files
+        env.AddPostAction(binary,Chmod(str(binary),0755))
 
 ################################################################################
 
@@ -489,6 +501,7 @@ class UserSconsTargets:
         self.f90 = None # F90 mains
         self.py = None # Python mains
         self.py_modules = None # Python modules that do not need SWIG and numpy
+        self.jl = None # Julia mains
     def build_all(self, env, glob_build, srcroot, bindir, libdir, pkgdir):
         if glob_build:
             env = env.Clone()
@@ -530,6 +543,10 @@ class UserSconsTargets:
                 docs_py = install_py_mains(env, self.py, bindir)
             if self.py_modules:
                 install_py_modules(env, self.py_modules, pkgdir)
+
+            if self.jl:
+                install_jl_mains(env, self.jl, bindir)
+
             install_self_doc(env, pkgdir, docs_c, docs_py, docs_f90, docs_c_mpi)
 
 # Additions by Hui Wang

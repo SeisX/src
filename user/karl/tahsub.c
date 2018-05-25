@@ -195,6 +195,61 @@ bool get_tah(float* trace, float* header,
   return false;
 }
 
+void read3dfile(int verbose, float* trace, sf_file auxfile,
+		sf_axis* auxfile_axa_array,double dxline, double diline)
+/*< read trace from 3D mapped volume >*/
+
+{
+  off_t indx_xline;
+  off_t indx_iline;
+  double double_indx;
+  off_t num_times;
+  off_t num_xlines;
+  off_t file_offset;
+  int indx_time;
+
+  double_indx=(dxline-sf_o(auxfile_axa_array[1]))/
+                sf_d(auxfile_axa_array[1]);
+  indx_xline=llround(double_indx);
+  /* dxline must be within 1% of an xline location and
+     must be in the xline range */
+  if(0.01<fabs(double_indx-indx_xline) ||
+       indx_xline<0 ||
+       indx_xline>=sf_n(auxfile_axa_array[1]) ){
+    fprintf(stderr,"cannot read xline=%f from auxfile\n",dxline);
+	sf_error("auxfile must contain all xlines on survey");
+  }
+
+  double_indx=(diline-sf_o(auxfile_axa_array[2]))/
+                sf_d(auxfile_axa_array[2]);
+  indx_iline=llround(double_indx);
+  /* diline must be within 1% of an iline location and
+     must be in the iline range */
+  if(0.01<fabs(double_indx-indx_iline) ||
+       indx_iline<0 ||
+       indx_iline>=sf_n(auxfile_axa_array[2]) ){
+    fprintf(stderr,"cannot read iline=%f from auxfile\n",dxline);
+	sf_error("auxfile must xontain all ilines survey");
+    }
+  num_times=sf_n(auxfile_axa_array[0]);
+  num_xlines=sf_n(auxfile_axa_array[1]);
+  file_offset=(indx_iline*num_xlines+indx_xline)*num_times*sizeof(float);
+  if(verbose>2){
+    fprintf(stderr,"dxline=%f,diline=%f,indx_xline=%lld, indx_iline=%lld\n",
+	            dxline   ,diline   ,indx_xline   , indx_iline);
+    fprintf(stderr,"file_offset=%lld\n",file_offset);
+  }
+  sf_seek(auxfile,file_offset,SEEK_SET);
+  if(verbose>2){
+    fprintf(stderr,"returned from seek\n");
+  }
+  sf_floatread(trace,num_times,auxfile);
+  if(verbose>3){
+    for(indx_time=0; indx_time<num_times; indx_time++){
+      fprintf(stderr,"trace[%d]=%f\n",indx_time,trace[indx_time]);
+    }
+  }
+}
 
 void tahwritemapped(int verbose, float* trace, void* iheader, 
 		    int n1_traces, int n1_headers,
@@ -204,6 +259,7 @@ void tahwritemapped(int verbose, float* trace, void* iheader,
 		    int* indx_of_keys, int dim_output,
 		    off_t* n_output, off_t* n_outheaders)
 /*< tah write mapped >*/
+
 {
 
   int iaxis;
@@ -299,12 +355,22 @@ void tahwritemapped(int verbose, float* trace, void* iheader,
 void tahwriteseq(int verbose, float* trace, void* iheader, 
 		 int n1_traces, int n1_headers,
 		 sf_file output,sf_file outheaders,
-		 sf_datatype typehead)
+		 sf_datatype typehead, int num_traces)
 /*< tah write seq >*/
 {
+  off_t file_offset;
 
   /* write trace and header to the output files.  LIke tahwritemapped, but  
      no seeks;  just write to the next location */
+  /* for some reason it looks like files are alligned at end of first trace
+     so without seq there is a zero trace and header in the output files.
+     I just added seq to make sure it traces are correct. */
+  file_offset=(num_traces-1);
+  file_offset*=n1_traces*sizeof(float);
+  sf_seek(output,file_offset,SEEK_SET);
+  file_offset=(num_traces-1);
+  file_offset*=n1_headers*sizeof(float);
+  sf_seek(outheaders,file_offset,SEEK_SET);
 
   sf_floatwrite(trace,n1_traces,output);
   
@@ -313,5 +379,82 @@ void tahwriteseq(int verbose, float* trace, void* iheader,
   if(verbose>2){
       fprintf(stderr,"trace and header written to output file\n");
   }
+}
+
+bool tahbinarysearchxy(double this_x, double this_y, 
+		       double* x_array, double* y_array,
+		       int num_xy, int* location )
+/*< tahbinarysearchxy  >*/
+/* binary search.  Return true/false was point found.  Location found 
+   will be in the location argument. */
+{   
+  int first=0, last=num_xy-1, middle=0;
+ 
+   /* handle zero length list as special case */
+   if(num_xy<1){
+     *location=0;
+     return false;
+   }
+   while( first <= last ){
+     middle = (first+last)/2;
+     if (  y_array[middle] <  this_y ||
+	   (y_array[middle] == this_y && x_array[middle] < this_x)){
+       first = middle + 1;    
+     } else if (y_array[middle] == this_y && x_array[middle] == this_x ){
+       *location=middle;
+       return true;
+     } else {
+       last = middle - 1;
+     }
+   }
+   /*    first > last.  value is not in list.  What is insertion point?
+	 middle is a valid index */
+   if (  y_array[middle] <  this_y ||
+	 (y_array[middle] == this_y && x_array[middle] < this_x)){
+     *location=middle+1;
+   } else {
+     *location=middle;
+   }
+   return false;   
+}
+
+int tahinsert_unique_xy(double **xarray, double **yarray, int **countarray,
+		         int *num_xy, int* size_xy_array, 
+		         double this_x, double this_y)
+/*< tah write seq >*/
+{
+  /* binary search for sx,sy.  Insert if not found */
+  int insert_indx=0;
+  int indx;
+
+  /* when 0==num_sxy, insert at location 0.  Otherwise binarysearch to find
+     the insertion point. */
+  if(0==*num_xy ||
+     !tahbinarysearchxy(this_x,this_y,
+			*xarray,*yarray,
+			*num_xy,&insert_indx)){
+    /* insert into sx,sy arrays */
+    /* fprintf(stderr,"before increment *num_xy=%d\n",*num_xy); */
+    (*num_xy)++;
+    /* fprintf(stderr,"before increment *num_xy=%d\n",*num_xy); */
+    if(*num_xy> *size_xy_array){
+      *size_xy_array +=1; /* make sure the array always get a little bigger */
+      *size_xy_array *= 1.2; /* grow array size by 20 % */
+      *xarray    =realloc(*    xarray,*size_xy_array*sizeof(double));
+      *yarray    =realloc(*    yarray,*size_xy_array*sizeof(double));
+      *countarray=realloc(*countarray,*size_xy_array*sizeof(int));
+    }
+    /* move array entries from insert_indx to the end one right
+       so this_x and this_y can be inserted */
+    for(indx=*num_xy-1; indx>insert_indx; indx--){
+      (*    xarray)[indx]=(*    xarray)[indx-1];
+      (*    yarray)[indx]=(*    yarray)[indx-1];
+      (*countarray)[indx]=(*countarray)[indx-1];
+    }	
+    (*    xarray)[insert_indx]=this_x;
+    (*    yarray)[insert_indx]=this_y;
+    (*countarray)[insert_indx]=*num_xy;
+  }
+  return insert_indx;
 }
 

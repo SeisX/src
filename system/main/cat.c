@@ -82,7 +82,7 @@ int main (int argc, char* argv[])
     sort = sf_intalloc(nin);
     if (sf_getints("order",sort,nin)) {
 	/* concatenation order */
-	qsort(order,nin,sizeof(int),sort_order);
+	qsort(order,nin,sizeof(int),sort_order);	
     }
     free(sort);
 
@@ -187,8 +187,8 @@ int main (int argc, char* argv[])
 	sf_putfloat(out,key,f);
     }
 
-    sf_setformat(out,sf_histstring(ins[0],"data_format"));
-    sf_fileflush(out,ins[0]);
+    sf_setformat(out,sf_histstring(ins[order[0]],"data_format"));
+    sf_fileflush(out,ins[order[0]]);
     sf_setform(out,SF_NATIVE);
 
     for (i=0; i < nopen; i++) {
@@ -251,11 +251,7 @@ static void check_compat (int esize, int nin, int nopen, sf_file *ins,
 	for (id=1; id <= dim; id++) {
 	    (void) snprintf(key,3,"n%d",id);
 	    if (!sf_histint(in,key,&ni) || (id != axis && ni != n[id-1]))
-#if defined(__cplusplus) || defined(c_plusplus)
-		sf_error("%s mismatch: need %ld",key,(long int) n[id-1]);
-#else
-	        sf_error("%s mismatch: need %lld",key,(long long int) n[id-1]);
-#endif
+		sf_error("%s mismatch: need %d",key,(int) n[id-1]);
 	    if (id == axis) naxis[i] = ni;
 	    (void) snprintf(key,3,"d%d",id);
 	    if (sf_histfloat(ins[0],key,&d)) {

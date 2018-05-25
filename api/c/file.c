@@ -84,7 +84,7 @@
 typedef struct sf_File *sf_file;
 /*^*/
 
-typedef enum {SF_UCHAR, SF_CHAR, SF_INT, SF_FLOAT, SF_COMPLEX, SF_SHORT, SF_DOUBLE} sf_datatype;
+typedef enum {SF_UCHAR, SF_CHAR, SF_INT, SF_FLOAT, SF_COMPLEX, SF_SHORT, SF_DOUBLE, SF_LONG} sf_datatype;
 typedef enum {SF_ASCII, SF_XDR, SF_NATIVE} sf_dataform;
 /*^*/
 
@@ -153,7 +153,7 @@ sf_file sf_input (/*@null@*/ const char* tag)
 	    memcpy(filename,tag,len);
 	}
 		
-	file->stream = fopen(filename,"r");
+	file->stream = fopen(filename,"r+");
 	if (NULL == file->stream) {
 	    sf_input_error(file,"Cannot read input (header) file",filename);
 	    return NULL;
@@ -200,7 +200,7 @@ sf_file sf_input (/*@null@*/ const char* tag)
     memcpy(file->dataname,filename,len);
 	
     if (0 != strcmp(filename,"stdin")) {
-	file->stream = freopen(filename,"rb",file->stream);
+	file->stream = freopen(filename,"r+b",file->stream);
 	if (NULL == file->stream) {
 	    sf_input_error(file,"Cannot read data file",filename);
 	    return NULL;
@@ -253,7 +253,7 @@ sf_file sf_output (/*@null@*/ const char* tag)
 	    memcpy(headname,tag,namelen);
 	}
 		
-	file->stream = fopen(headname,"w");
+	file->stream = fopen(headname,"w+");
 	if (NULL == file->stream) 
         {
             free(file);
@@ -384,6 +384,9 @@ size_t sf_esize(sf_file file)
         case SF_SHORT:
             return sizeof(short);
             break;
+	case SF_LONG:
+	    return sizeof(off_t);
+	    break;
         case SF_DOUBLE:
             return sizeof(double);
             break;
@@ -488,6 +491,8 @@ void sf_setformat (sf_file file, const char* format)
 	sf_settype(file,SF_UCHAR);
     } else if (NULL != strstr(format,"short")) {
 	sf_settype(file,SF_SHORT);
+    } else if (NULL != strstr(format,"long")) {
+	sf_settype(file,SF_LONG);
     } else if (NULL != strstr(format,"double")) {
 	sf_settype(file,SF_DOUBLE);
     } else {
@@ -624,7 +629,7 @@ static bool readpathfile (const char* filename, char* datapath)
     FILE *fp;
     char host[PATH_MAX], *thishost, path[PATH_MAX];
 	
-    fp = fopen(filename,"r");
+    fp = fopen(filename,"r+");
     if (NULL == fp) return false;
 	
     if (0 >= fscanf(fp,"datapath=%s",datapath))
@@ -676,6 +681,44 @@ void sf_fileclose (sf_file file)
     if (NULL != file->dataname) {
 	free (file->dataname);
 	file->dataname = NULL;
+    }
+}
+
+void sf_fileclosedelete (sf_file file)
+/*< close a file and then delete the file from disk >*/
+{
+    if (NULL == file) return;
+
+    if (file->stream != stdin &&
+    file->stream != stdout &&
+    file->stream != NULL) {
+    (void) fclose (file->stream);
+    file->stream = NULL;
+    }
+
+    if (file->head != NULL) {
+    (void) unlink (file->headname);
+    (void) fclose (file->head);
+    file->head = NULL;
+    remove(file->headname);
+    free(file->headname);
+    file->headname = NULL;
+    }
+
+    if (NULL != file->pars) {
+    sf_simtab_close (file->pars);
+    file->pars = NULL;
+    }
+
+    if (NULL != file->buf) {
+    free (file->buf);
+    file->buf = NULL;
+    }
+
+    if (NULL != file->dataname) {
+    remove (file->dataname);
+    free (file->dataname);
+    file->dataname = NULL;
     }
 }
 
@@ -816,6 +859,19 @@ void sf_fileflush (sf_file file, sf_file src)
 		    break;
 	    }
 	    break;
+	case SF_LONG:
+	    switch (file->form) {
+		case SF_ASCII:
+		    sf_putstring(file,"data_format","ascii_long");
+		    break;
+		case SF_XDR:
+		    sf_putstring(file,"data_format","xdr_long");
+		    break;
+		default:
+		    sf_putstring(file,"data_format","native_long");
+		    break;
+	    }
+	    break;
         case SF_DOUBLE:
 	    switch (file->form) {
 		case SF_ASCII:
@@ -869,7 +925,7 @@ void sf_fileflush (sf_file file, sf_file src)
 	fprintf(file->stream,"\tin=\"stdin\"\n\n%c%c%c",
 		SF_EOL,SF_EOL,SF_EOT);
     } else {
-	file->stream = freopen(file->dataname,file->rw? "w+b":"wb",file->stream);       
+	file->stream = freopen(file->dataname,file->rw? "w+b":"w+b",file->stream);       
 	if (NULL == file->stream) 
 	    sf_error ("%s: Cannot write to data file %s:",
 		      __FILE__,file->dataname);	
@@ -879,6 +935,18 @@ void sf_fileflush (sf_file file, sf_file src)
     file->dataname=NULL;
 	
     if (file->dryrun) exit(0);
+}
+
+void sf_readwrite(sf_file file, bool flag)
+/*< set the readwrite flag >*/
+{
+    file->rw = flag;
+}
+
+void sf_fflush(sf_file file)
+/*< flush file stream >*/
+{
+    if (NULL != file->stream) fflush(file->stream);
 }
 
 void sf_putint (sf_file file, const char* key, int par)
@@ -1349,6 +1417,43 @@ void sf_shortread (/*@out@*/ short* arr, size_t size, sf_file file)
     }
 }
 
+void sf_longread (/*@out@*/ off_t* arr, size_t size, sf_file file)
+/*< read a long array arr[size] from file >*/
+{
+    char* buf;
+    size_t i, left, nbuf, got, bufsiz;
+	
+    switch (file->form) {
+	case SF_ASCII:
+	    for (i = 0; i < size; i++) {
+		if (EOF==fscanf(file->stream,"%lld",arr+i))
+		    sf_error ("%s: trouble reading ascii:",__FILE__);
+	    }
+	    break;
+	case SF_XDR:
+	    size *= sizeof(int);
+	    buf = (char*)arr+size;
+	    bufsiz = sf_bufsiz(file);
+	    for (left = size; left > 0; left -= nbuf) {
+		nbuf = (bufsiz < left)? bufsiz : left;
+		(void) xdr_setpos(&(file->xdr),0);
+		if (nbuf != fread(file->buf,1,nbuf,file->stream))
+		    sf_error ("%s: trouble reading:",__FILE__);
+		if (!xdr_vector(&(file->xdr),buf-left,
+				nbuf/sizeof(off_t),sizeof(off_t),
+				(xdrproc_t) xdr_int))
+		    sf_error ("%s: trouble reading xdr",__FILE__);
+	    }
+	    break;
+	default:
+	    got = fread(arr,sizeof(off_t),size,file->stream);
+	    if (got != size) 
+		sf_error ("%s: trouble reading: %lu of %lu",__FILE__,got,size);
+	    break;
+    }
+}
+
+
 void sf_shortwrite (short* arr, size_t size, sf_file file)
 /*< write a short array arr[size] to file >*/
 {
@@ -1570,7 +1675,7 @@ void sf_unpipe (sf_file file, off_t size)
     */
 	
     (void) fclose(file->stream);
-    file->stream = freopen(dataname,"rb",tmp);
+    file->stream = freopen(dataname,"r+b",tmp);
 	
     if (NULL == file->stream)
 	sf_error ("%s: Trouble reading data file %s:",__FILE__,dataname);
